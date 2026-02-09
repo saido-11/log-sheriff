@@ -1,0 +1,8 @@
+2026-02-09T18:01:00Z INFO service started pid=4312
+2026-02-09T18:01:01Z INFO request completed method=GET path=/health status=200 latency_ms=3
+2026-02-09T18:01:02Z WARN request completed method=POST path=/api/v1/orders status=429 latency_ms=88
+2026-02-09T18:01:03Z ERROR database timeout shard=7 retries=1
+2026-02-09T18:01:04Z INFO request completed method=GET path=/health status=200 latency_ms=2
+2026-02-09T18:01:05Z DEBUG cache lookup key=user:123 hit=false
+2026-02-09T18:01:06Z ERROR database timeout shard=9 retries=1
+2026-02-09T18:01:07Z WARN request completed method=POST path=/api/v1/orders status=429 latency_ms=92
