@@ -129,6 +129,6 @@ If either time filter is set, lines that do not start with a parseable timestamp
 ## Roadmap
 
 - [x] `--since` / `--until` time filtering for ISO timestamps
-- [ ] Better normalization: UUIDs/hex/request IDs to `<id>`
+- [ ] Better normalization: UUIDs/hex/request IDs → `<id>`
 - [ ] `--csv` output
-- [ ] Optional `index` command for repeated queries
+- [ ] Optional: `index` command for repeated queries
