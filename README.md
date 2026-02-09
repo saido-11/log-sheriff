@@ -72,6 +72,12 @@ ctest --test-dir build --output-on-failure
 ./build/log-sheriff summarize samples/sample.log samples/sample.log --level warn
 ```
 
+### Filter by time range
+
+```bash
+./build/log-sheriff summarize samples/sample.log --since "2026-02-09T18:01:03Z" --until "2026-02-09T18:01:06Z"
+```
+
 ## Example output
 
 Command:
@@ -102,8 +108,19 @@ Rank  Count  Normalized line
 Options:
 - `--contains <substring>`: optional substring filter
 - `--level <error|warn|info|debug>`: optional case-insensitive level filter
+- `--since "<timestamp>"`: keep lines with parsed timestamps at or after this value (inclusive)
+- `--until "<timestamp>"`: keep lines with parsed timestamps at or before this value (inclusive)
 - `--top <N>`: number of top normalized lines to show (default: `10`)
 - `--json`: print JSON output instead of table output
+
+Accepted timestamp formats for `--since` / `--until`:
+- `YYYY-MM-DDTHH:MM:SSZ` (treated as UTC)
+- `YYYY-MM-DD HH:MM:SS` (treated as local time)
+
+Timestamps are converted to epoch seconds and compared consistently; local-format timestamps use the
+machine's local timezone.
+
+If either time filter is set, lines that do not start with a parseable timestamp are excluded.
 
 ## Notes on large files
 
@@ -111,7 +128,7 @@ Options:
 
 ## Roadmap
 
-- [ ] `--since` / `--until` time filtering for ISO timestamps
+- [x] `--since` / `--until` time filtering for ISO timestamps
 - [ ] Better normalization: UUIDs/hex/request IDs to `<id>`
 - [ ] `--csv` output
 - [ ] Optional `index` command for repeated queries

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <ctime>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -11,6 +12,11 @@
 
 namespace log_sheriff {
 namespace {
+
+struct ParsedTimestamp {
+  std::time_t epoch_seconds = 0;
+  std::size_t consumed_chars = 0;
+};
 
 std::string to_lower_copy(std::string_view input) {
   std::string out;
@@ -110,6 +116,153 @@ std::optional<LogLevel> detect_level(std::string_view line) {
   return std::nullopt;
 }
 
+bool parse_fixed_int(std::string_view input, std::size_t pos, std::size_t len, int& value) {
+  if (pos + len > input.size()) {
+    return false;
+  }
+
+  int out = 0;
+  for (std::size_t i = 0; i < len; ++i) {
+    const unsigned char ch = static_cast<unsigned char>(input[pos + i]);
+    if (std::isdigit(ch) == 0) {
+      return false;
+    }
+    out = out * 10 + (ch - static_cast<unsigned char>('0'));
+  }
+
+  value = out;
+  return true;
+}
+
+bool is_leap_year(int year) {
+  if (year % 400 == 0) {
+    return true;
+  }
+  if (year % 100 == 0) {
+    return false;
+  }
+  return year % 4 == 0;
+}
+
+int days_in_month(int year, int month) {
+  static constexpr int kDaysByMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (month < 1 || month > 12) {
+    return 0;
+  }
+  if (month == 2 && is_leap_year(year)) {
+    return 29;
+  }
+  return kDaysByMonth[month - 1];
+}
+
+std::time_t to_time_utc(std::tm tm) {
+#if defined(_WIN32)
+  return _mkgmtime(&tm);
+#else
+  return timegm(&tm);
+#endif
+}
+
+std::string_view trim(std::string_view input) {
+  std::size_t start = 0;
+  while (start < input.size() && std::isspace(static_cast<unsigned char>(input[start])) != 0) {
+    ++start;
+  }
+
+  std::size_t end = input.size();
+  while (end > start && std::isspace(static_cast<unsigned char>(input[end - 1])) != 0) {
+    --end;
+  }
+
+  return input.substr(start, end - start);
+}
+
+std::optional<ParsedTimestamp> parse_timestamp_prefix(std::string_view input) {
+  if (input.size() < 19) {
+    return std::nullopt;
+  }
+
+  if (input[4] != '-' || input[7] != '-' || input[13] != ':' || input[16] != ':') {
+    return std::nullopt;
+  }
+
+  const char separator = input[10];
+  if (separator != 'T' && separator != ' ') {
+    return std::nullopt;
+  }
+
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+
+  if (!parse_fixed_int(input, 0, 4, year) || !parse_fixed_int(input, 5, 2, month) ||
+      !parse_fixed_int(input, 8, 2, day) || !parse_fixed_int(input, 11, 2, hour) ||
+      !parse_fixed_int(input, 14, 2, minute) || !parse_fixed_int(input, 17, 2, second)) {
+    return std::nullopt;
+  }
+
+  if (month < 1 || month > 12) {
+    return std::nullopt;
+  }
+  if (day < 1 || day > days_in_month(year, month)) {
+    return std::nullopt;
+  }
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return std::nullopt;
+  }
+
+  const bool is_utc_z = separator == 'T';
+  std::size_t consumed_chars = 19;
+  if (is_utc_z) {
+    if (input.size() < 20 || input[19] != 'Z') {
+      return std::nullopt;
+    }
+    consumed_chars = 20;
+  }
+
+  if (input.size() > consumed_chars &&
+      std::isspace(static_cast<unsigned char>(input[consumed_chars])) == 0) {
+    return std::nullopt;
+  }
+
+  std::tm tm{};
+  tm.tm_year = year - 1900;
+  tm.tm_mon = month - 1;
+  tm.tm_mday = day;
+  tm.tm_hour = hour;
+  tm.tm_min = minute;
+  tm.tm_sec = second;
+  tm.tm_isdst = -1;
+
+  std::time_t epoch_seconds = 0;
+  if (is_utc_z) {
+    epoch_seconds = to_time_utc(tm);
+  } else {
+    epoch_seconds = std::mktime(&tm);
+  }
+
+  if (epoch_seconds == static_cast<std::time_t>(-1)) {
+    return std::nullopt;
+  }
+
+  return ParsedTimestamp{epoch_seconds, consumed_chars};
+}
+
+std::optional<std::time_t> parse_timestamp_exact(std::string_view input) {
+  const std::string_view trimmed = trim(input);
+  const auto parsed = parse_timestamp_prefix(trimmed);
+  if (!parsed.has_value()) {
+    return std::nullopt;
+  }
+  if (parsed->consumed_chars != trimmed.size()) {
+    return std::nullopt;
+  }
+  return parsed->epoch_seconds;
+}
+
 }  // namespace
 
 std::optional<LogLevel> parse_level(std::string_view raw) {
@@ -148,6 +301,27 @@ SummaryResult Summarizer::summarize(const SummarizeOptions& options) const {
     throw std::invalid_argument("no input files supplied");
   }
 
+  const bool has_time_filter = options.since.has_value() || options.until.has_value();
+  std::optional<std::time_t> since_bound;
+  std::optional<std::time_t> until_bound;
+  if (options.since.has_value()) {
+    since_bound = parse_timestamp_exact(*options.since);
+    if (!since_bound.has_value()) {
+      throw std::invalid_argument(
+          "invalid --since timestamp; expected YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD HH:MM:SS");
+    }
+  }
+  if (options.until.has_value()) {
+    until_bound = parse_timestamp_exact(*options.until);
+    if (!until_bound.has_value()) {
+      throw std::invalid_argument(
+          "invalid --until timestamp; expected YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD HH:MM:SS");
+    }
+  }
+  if (since_bound.has_value() && until_bound.has_value() && *since_bound > *until_bound) {
+    throw std::invalid_argument("--since must be less than or equal to --until");
+  }
+
   std::unordered_map<std::string, std::uint64_t> frequency;
 
   SummaryResult result;
@@ -162,6 +336,19 @@ SummaryResult Summarizer::summarize(const SummarizeOptions& options) const {
     std::string line;
     while (std::getline(in, line)) {
       ++result.total_lines;
+
+      if (has_time_filter) {
+        const auto parsed = parse_timestamp_prefix(line);
+        if (!parsed.has_value()) {
+          continue;
+        }
+        if (since_bound.has_value() && parsed->epoch_seconds < *since_bound) {
+          continue;
+        }
+        if (until_bound.has_value() && parsed->epoch_seconds > *until_bound) {
+          continue;
+        }
+      }
 
       if (options.contains.has_value() && line.find(*options.contains) == std::string::npos) {
         continue;

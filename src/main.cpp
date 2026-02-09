@@ -107,6 +107,8 @@ int main(int argc, char** argv) {
   bool print_json_output = false;
   std::string level_raw;
   std::string contains_raw;
+  std::string since_raw;
+  std::string until_raw;
 
   CLI::App* summarize = app.add_subcommand("summarize", "Summarize one or more log files.");
   summarize->add_option("files", summarize_options.files, "Input log files.")->required()->check(CLI::ExistingFile);
@@ -114,6 +116,14 @@ int main(int argc, char** argv) {
   auto* contains_opt = summarize->add_option("--contains", contains_raw, "Filter lines containing this substring.");
   auto* level_opt = summarize->add_option("--level", level_raw, "Filter by level: error|warn|info|debug.")
                         ->check(CLI::IsMember({"error", "warn", "info", "debug"}, CLI::ignore_case));
+  auto* since_opt = summarize->add_option(
+      "--since",
+      since_raw,
+      "Keep lines at or after timestamp (YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD HH:MM:SS).");
+  auto* until_opt = summarize->add_option(
+      "--until",
+      until_raw,
+      "Keep lines at or before timestamp (YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD HH:MM:SS).");
   summarize->add_option("--top", summarize_options.top_n, "Show top N normalized lines.")
       ->default_val(10)
       ->check(CLI::PositiveNumber);
@@ -130,6 +140,12 @@ int main(int argc, char** argv) {
       if (!summarize_options.level.has_value()) {
         throw std::invalid_argument("invalid --level value");
       }
+    }
+    if (since_opt->count() > 0) {
+      summarize_options.since = since_raw;
+    }
+    if (until_opt->count() > 0) {
+      summarize_options.until = until_raw;
     }
 
     const log_sheriff::Summarizer analyzer;

@@ -24,6 +24,8 @@ struct SummarizeOptions {
   std::vector<std::string> files;
   std::optional<std::string> contains;
   std::optional<LogLevel> level;
+  std::optional<std::string> since;
+  std::optional<std::string> until;
   std::size_t top_n = 10;
 };
 
